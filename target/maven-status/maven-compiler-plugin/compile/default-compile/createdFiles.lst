@@ -1,0 +1,11 @@
+core/InterruptEvent.class
+ds/TestDataStructures.class
+com/mycompany/proyecto/so/ProyectoSO.class
+ds/Queue.class
+core/IOSpec.class
+ds/Node.class
+ds/SinglyLinkedList$Comparator.class
+core/ProcessState.class
+ds/SinglyLinkedList.class
+core/Process.class
+core/TestCoreModels.class
