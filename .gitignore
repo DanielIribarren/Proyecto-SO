@@ -1,8 +1,16 @@
-# Java compiled files
+# ===== Java =====
 *.class
 
-# Maven build directory
+# ===== Maven =====
 target/
 
-# NetBeans (opcional pero recomendado)
+# ===== NetBeans =====
 .nbattrs
+nbproject/private/
+
+# ===== VS Code / Windsurf =====
+.vscode/
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
