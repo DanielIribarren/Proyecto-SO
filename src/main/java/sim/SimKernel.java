@@ -123,7 +123,7 @@ public class SimKernel {
     
     // 2. Actualizar E/S
     private void updateIO() {
-        // Recorrer procesos bloqueados y serviciar su E/S
+        // Recorrer procesos bloqueados en RAM y serviciar su E/S
         SinglyLinkedList<core.Process> stillBlocked = new SinglyLinkedList<>();
         
         while (!blockedQueue.isEmpty()) {
@@ -148,6 +148,31 @@ public class SimKernel {
         
         // Restaurar cola de bloqueados
         blockedQueue = stillBlocked;
+        
+        // También serviciar E/S de procesos suspendidos bloqueados
+        SinglyLinkedList<core.Process> stillSuspendedBlocked = new SinglyLinkedList<>();
+        
+        while (!suspendedBlocked.isEmpty()) {
+            core.Process p = suspendedBlocked.removeFirst();
+            
+            if (p.getIoSpec() != null && p.getIoSpec().isGenerated()) {
+                boolean satisfied = p.getIoSpec().serviceIO();
+                
+                if (satisfied) {
+                    // E/S completada, mover a SUSPENDED_READY
+                    p.setState(ProcessState.SUSPENDED_READY);
+                    suspendedReady.addLast(p);
+                    log.log(clock.getCurrentTick(), "Proceso " + p.getPid() + " desbloqueado en swap (E/S completada)");
+                } else {
+                    // Sigue bloqueado
+                    stillSuspendedBlocked.addLast(p);
+                }
+            } else {
+                stillSuspendedBlocked.addLast(p);
+            }
+        }
+        
+        suspendedBlocked = stillSuspendedBlocked;
     }
     
     // 3. Admitir nuevos procesos
@@ -175,9 +200,9 @@ public class SimKernel {
     private void applyMediumTermSwap() {
         int processesInRam = readyQueue.size() + blockedQueue.size() + (running != null ? 1 : 0);
         
-        // Si excedemos RAM, suspender procesos de menor prioridad
+        // SWAP OUT: Si excedemos RAM, suspender procesos de menor prioridad
+        // Primero intentar suspender procesos READY
         while (processesInRam > ramLimit && !readyQueue.isEmpty()) {
-            // Buscar proceso de menor prioridad en READY
             core.Process toSwap = findLowestPriority(readyQueue);
             if (toSwap != null) {
                 readyQueue.remove(toSwap);
@@ -189,6 +214,53 @@ public class SimKernel {
                 break;
             }
         }
+        
+        // Si aún excedemos RAM y no hay más READY, suspender BLOCKED
+        while (processesInRam > ramLimit && !blockedQueue.isEmpty()) {
+            core.Process toSwap = findLowestPriority(blockedQueue);
+            if (toSwap != null) {
+                blockedQueue.remove(toSwap);
+                toSwap.setState(ProcessState.SUSPENDED_BLOCKED);
+                suspendedBlocked.addLast(toSwap);
+                log.log(clock.getCurrentTick(), "Proceso bloqueado " + toSwap.getPid() + " suspendido (RAM limit)");
+                processesInRam--;
+            } else {
+                break;
+            }
+        }
+        
+        // SWAP IN: Si hay espacio en RAM, traer procesos suspendidos de vuelta
+        // Priorizar procesos con mayor prioridad o deadlines cercanos
+        while (processesInRam < ramLimit && !suspendedReady.isEmpty()) {
+            // Buscar el proceso de mayor prioridad en suspendidos
+            core.Process toRestore = findHighestPriorityInSuspended();
+            if (toRestore != null) {
+                suspendedReady.remove(toRestore);
+                toRestore.setState(ProcessState.READY);
+                readyQueue.addLast(toRestore);
+                log.log(clock.getCurrentTick(), "Proceso " + toRestore.getPid() + " restaurado a RAM");
+                processesInRam++;
+            } else {
+                break;
+            }
+        }
+        
+        // También manejar procesos bloqueados que se suspendieron
+        // Si se desbloquearon mientras estaban suspendidos, moverlos a SUSPENDED_READY
+        SinglyLinkedList<core.Process> stillSuspendedBlocked = new SinglyLinkedList<>();
+        while (!suspendedBlocked.isEmpty()) {
+            core.Process p = suspendedBlocked.removeFirst();
+            
+            // Si su E/S se completó, mover a SUSPENDED_READY
+            if (p.getIoSpec() != null && p.getIoSpec().isSatisfied()) {
+                p.setState(ProcessState.SUSPENDED_READY);
+                suspendedReady.addLast(p);
+                log.log(clock.getCurrentTick(), "Proceso " + p.getPid() + " movido a SUSPENDED_READY (E/S completada)");
+            } else {
+                stillSuspendedBlocked.addLast(p);
+            }
+        }
+        suspendedBlocked = stillSuspendedBlocked;
     }
     
     // 5. Planificación y preemption
@@ -372,6 +444,21 @@ public class SimKernel {
             }
         }
         return lowest;
+    }
+    
+    // Helper para swap in - busca el de mayor prioridad en suspendidos
+    private core.Process findHighestPriorityInSuspended() {
+        Object[] array = suspendedReady.toArray();
+        if (array.length == 0) return null;
+        
+        core.Process highest = (core.Process) array[0];
+        for (Object obj : array) {
+            core.Process p = (core.Process) obj;
+            if (p.getPriority() > highest.getPriority()) {
+                highest = p;
+            }
+        }
+        return highest;
     }
     
     // Helpers para SRT
