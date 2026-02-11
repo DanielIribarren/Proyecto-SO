@@ -22,10 +22,15 @@ public class SystemSnapshot {
     // Logs
     public String[] logs;
     
-    // Métricas básicas
+    // Métricas
     public double cpuUtilization;
     public int totalProcesses;
     public int completedProcesses;
+    public int missedDeadlines;
+    public double successRate;
+    public double throughput;
+    public double averageWaitTime;
+    public double averageTurnaroundTime;
     
     public SystemSnapshot() {
         // Inicializar arreglos vacíos por defecto

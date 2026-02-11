@@ -2,8 +2,10 @@ package sim;
 
 import core.InterruptEvent;
 import core.ProcessState;
+import core.SimProcess;
 import ds.Queue;
 import ds.SinglyLinkedList;
+import metrics.MetricsCollector;
 import java.util.concurrent.Semaphore;
 
 // Núcleo del simulador RTOS
@@ -17,19 +19,22 @@ public class SimKernel {
     private EventLog log;
     
     // Colas de procesos
-    private SinglyLinkedList<core.Process> newQueue;
-    private SinglyLinkedList<core.Process> readyQueue;
-    private SinglyLinkedList<core.Process> blockedQueue;
-    private SinglyLinkedList<core.Process> suspendedReady;
-    private SinglyLinkedList<core.Process> suspendedBlocked;
-    private SinglyLinkedList<core.Process> terminated;
+    private SinglyLinkedList<SimProcess> newQueue;
+    private SinglyLinkedList<SimProcess> readyQueue;
+    private SinglyLinkedList<SimProcess> blockedQueue;
+    private SinglyLinkedList<SimProcess> suspendedReady;
+    private SinglyLinkedList<SimProcess> suspendedBlocked;
+    private SinglyLinkedList<SimProcess> terminated;
     
     // Proceso en ejecución
-    private core.Process running;
+    private SimProcess running;
     
     // Cola de interrupciones
     private Queue<InterruptEvent> interruptQueue;
     private InterruptGenerator interruptGenerator;
+    
+    // Métricas
+    private MetricsCollector metrics;
     
     // Configuración
     private Policy currentPolicy;
@@ -43,6 +48,7 @@ public class SimKernel {
     public SimKernel() {
         this.clock = new Clock();
         this.log = new EventLog();
+        this.metrics = new MetricsCollector();
         
         // Inicializar colas
         this.newQueue = new SinglyLinkedList<>();
@@ -116,7 +122,7 @@ public class SimKernel {
         }
         
         // Crear ISR y ponerlo a correr
-        core.Process isr = core.Process.createISR(9999, "ISR_" + event.getType(), 5, clock.getCurrentTick());
+        SimProcess isr = SimProcess.createISR(9999, "ISR_" + event.getType(), 5, clock.getCurrentTick());
         isr.setState(ProcessState.RUNNING);
         running = isr;
         log.log(clock.getCurrentTick(), "ISR iniciada: " + isr.getName());
@@ -125,10 +131,10 @@ public class SimKernel {
     // 2. Actualizar E/S
     private void updateIO() {
         // Recorrer procesos bloqueados en RAM y serviciar su E/S
-        SinglyLinkedList<core.Process> stillBlocked = new SinglyLinkedList<>();
+        SinglyLinkedList<SimProcess> stillBlocked = new SinglyLinkedList<>();
         
         while (!blockedQueue.isEmpty()) {
-            core.Process p = blockedQueue.removeFirst();
+            SimProcess p = blockedQueue.removeFirst();
             
             if (p.getIoSpec() != null && p.getIoSpec().isGenerated()) {
                 boolean satisfied = p.getIoSpec().serviceIO();
@@ -151,10 +157,10 @@ public class SimKernel {
         blockedQueue = stillBlocked;
         
         // También serviciar E/S de procesos suspendidos bloqueados
-        SinglyLinkedList<core.Process> stillSuspendedBlocked = new SinglyLinkedList<>();
+        SinglyLinkedList<SimProcess> stillSuspendedBlocked = new SinglyLinkedList<>();
         
         while (!suspendedBlocked.isEmpty()) {
-            core.Process p = suspendedBlocked.removeFirst();
+            SimProcess p = suspendedBlocked.removeFirst();
             
             if (p.getIoSpec() != null && p.getIoSpec().isGenerated()) {
                 boolean satisfied = p.getIoSpec().serviceIO();
@@ -181,7 +187,7 @@ public class SimKernel {
         int processesInRam = readyQueue.size() + blockedQueue.size() + (running != null ? 1 : 0);
         
         while (!newQueue.isEmpty() && processesInRam < ramLimit) {
-            core.Process p = newQueue.removeFirst();
+            SimProcess p = newQueue.removeFirst();
             
             // Verificar si ya llegó su arrival tick
             if (p.getArrivalTick() <= clock.getCurrentTick()) {
@@ -204,7 +210,7 @@ public class SimKernel {
         // SWAP OUT: Si excedemos RAM, suspender procesos de menor prioridad
         // Primero intentar suspender procesos READY
         while (processesInRam > ramLimit && !readyQueue.isEmpty()) {
-            core.Process toSwap = findLowestPriority(readyQueue);
+            SimProcess toSwap = findLowestPriority(readyQueue);
             if (toSwap != null) {
                 readyQueue.remove(toSwap);
                 toSwap.setState(ProcessState.SUSPENDED_READY);
@@ -218,7 +224,7 @@ public class SimKernel {
         
         // Si aún excedemos RAM y no hay más READY, suspender BLOCKED
         while (processesInRam > ramLimit && !blockedQueue.isEmpty()) {
-            core.Process toSwap = findLowestPriority(blockedQueue);
+            SimProcess toSwap = findLowestPriority(blockedQueue);
             if (toSwap != null) {
                 blockedQueue.remove(toSwap);
                 toSwap.setState(ProcessState.SUSPENDED_BLOCKED);
@@ -234,7 +240,7 @@ public class SimKernel {
         // Priorizar procesos con mayor prioridad o deadlines cercanos
         while (processesInRam < ramLimit && !suspendedReady.isEmpty()) {
             // Buscar el proceso de mayor prioridad en suspendidos
-            core.Process toRestore = findHighestPriorityInSuspended();
+            SimProcess toRestore = findHighestPriorityInSuspended();
             if (toRestore != null) {
                 suspendedReady.remove(toRestore);
                 toRestore.setState(ProcessState.READY);
@@ -248,9 +254,9 @@ public class SimKernel {
         
         // También manejar procesos bloqueados que se suspendieron
         // Si se desbloquearon mientras estaban suspendidos, moverlos a SUSPENDED_READY
-        SinglyLinkedList<core.Process> stillSuspendedBlocked = new SinglyLinkedList<>();
+        SinglyLinkedList<SimProcess> stillSuspendedBlocked = new SinglyLinkedList<>();
         while (!suspendedBlocked.isEmpty()) {
-            core.Process p = suspendedBlocked.removeFirst();
+            SimProcess p = suspendedBlocked.removeFirst();
             
             // Si su E/S se completó, mover a SUSPENDED_READY
             if (p.getIoSpec() != null && p.getIoSpec().isSatisfied()) {
@@ -279,7 +285,7 @@ public class SimKernel {
             }
             // SRT: preempta si llega proceso con menos tiempo restante
             else if (currentPolicy == Policy.SRT) {
-                core.Process shortest = findShortestRemaining(readyQueue);
+                SimProcess shortest = findShortestRemaining(readyQueue);
                 if (shortest != null && shortest.getInstructionsRemaining() < running.getInstructionsRemaining()) {
                     shouldPreempt = true;
                     log.log(clock.getCurrentTick(), "Preemption SRT: proceso más corto disponible");
@@ -287,7 +293,7 @@ public class SimKernel {
             }
             // PRIO: preempta si llega proceso de mayor prioridad
             else if (currentPolicy == Policy.PRIO) {
-                core.Process highest = findHighestPriority(readyQueue);
+                SimProcess highest = findHighestPriority(readyQueue);
                 if (highest != null && highest.getPriority() > running.getPriority()) {
                     shouldPreempt = true;
                     log.log(clock.getCurrentTick(), "Preemption PRIO: proceso de mayor prioridad disponible");
@@ -295,7 +301,7 @@ public class SimKernel {
             }
             // EDF: preempta si llega proceso con deadline más cercano
             else if (currentPolicy == Policy.EDF) {
-                core.Process earliest = findEarliestDeadline(readyQueue);
+                SimProcess earliest = findEarliestDeadline(readyQueue);
                 if (earliest != null && earliest.getDeadlineRemaining(clock.getCurrentTick()) < running.getDeadlineRemaining(clock.getCurrentTick())) {
                     shouldPreempt = true;
                     log.log(clock.getCurrentTick(), "Preemption EDF: proceso con deadline más cercano disponible");
@@ -348,6 +354,14 @@ public class SimKernel {
         // Verificar si terminó
         if (finished) {
             running.terminate(clock.getCurrentTick());
+            
+            // Registrar métricas del proceso completado
+            int waitTime = running.getWaitTime();
+            int turnaroundTime = running.getTurnaroundTime();
+            int cpuTime = running.getTotalInstructions();
+            boolean missedDeadline = running.isMissedDeadline();
+            metrics.recordCompletedProcess(waitTime, turnaroundTime, cpuTime, missedDeadline);
+            
             terminated.addLast(running);
             log.log(clock.getCurrentTick(), "Proceso " + running.getPid() + " terminado");
             running = null;
@@ -365,9 +379,12 @@ public class SimKernel {
         // Incrementar wait time de procesos en READY
         Object[] readyArray = readyQueue.toArray();
         for (Object obj : readyArray) {
-            core.Process p = (core.Process) obj;
+            SimProcess p = (SimProcess) obj;
             p.incrementWaitTime();
         }
+        
+        // Registrar tick en métricas
+        metrics.recordTick(running != null);
     }
 
     // 8. Generar snapshot
@@ -390,19 +407,27 @@ public class SimKernel {
         // Logs
         snapshot.logs = log.toArray();
         
-        // Métricas básicas
+        // Métricas
         snapshot.totalProcesses = newQueue.size() + readyQueue.size() + blockedQueue.size() + 
                                   suspendedReady.size() + suspendedBlocked.size() + 
                                   terminated.size() + (running != null ? 1 : 0);
-        snapshot.completedProcesses = terminated.size();
-        snapshot.cpuUtilization = running != null ? 100.0 : 0.0;
+        snapshot.completedProcesses = metrics.getCompletedProcesses();
+        snapshot.missedDeadlines = metrics.getMissedDeadlines();
+        snapshot.cpuUtilization = metrics.getCpuUtilization();
+        snapshot.successRate = metrics.getSuccessRate();
+        snapshot.throughput = metrics.getThroughput();
+        snapshot.averageWaitTime = metrics.getAverageWaitTime();
+        snapshot.averageTurnaroundTime = metrics.getAverageTurnaroundTime();
+        
+        // Actualizar total de procesos en el collector
+        metrics.setTotalProcesses(snapshot.totalProcesses);
         
         return snapshot;
     }
     
     // Helpers
     
-    private core.Process selectNextProcess() {
+    private SimProcess selectNextProcess() {
         if (readyQueue.isEmpty()) {
             return null;
         }
@@ -433,13 +458,13 @@ public class SimKernel {
         }
     }
     
-    private core.Process findLowestPriority(SinglyLinkedList<core.Process> list) {
+    private SimProcess findLowestPriority(SinglyLinkedList<SimProcess> list) {
         Object[] array = list.toArray();
         if (array.length == 0) return null;
         
-        core.Process lowest = (core.Process) array[0];
+        SimProcess lowest = (SimProcess) array[0];
         for (Object obj : array) {
-            core.Process p = (core.Process) obj;
+            SimProcess p = (SimProcess) obj;
             if (p.getPriority() < lowest.getPriority()) {
                 lowest = p;
             }
@@ -448,13 +473,13 @@ public class SimKernel {
     }
     
     // Helper para swap in - busca el de mayor prioridad en suspendidos
-    private core.Process findHighestPriorityInSuspended() {
+    private SimProcess findHighestPriorityInSuspended() {
         Object[] array = suspendedReady.toArray();
         if (array.length == 0) return null;
         
-        core.Process highest = (core.Process) array[0];
+        SimProcess highest = (SimProcess) array[0];
         for (Object obj : array) {
-            core.Process p = (core.Process) obj;
+            SimProcess p = (SimProcess) obj;
             if (p.getPriority() > highest.getPriority()) {
                 highest = p;
             }
@@ -463,13 +488,13 @@ public class SimKernel {
     }
     
     // Helpers para SRT
-    private core.Process findShortestRemaining(SinglyLinkedList<core.Process> list) {
+    private SimProcess findShortestRemaining(SinglyLinkedList<SimProcess> list) {
         Object[] array = list.toArray();
         if (array.length == 0) return null;
         
-        core.Process shortest = (core.Process) array[0];
+        SimProcess shortest = (SimProcess) array[0];
         for (Object obj : array) {
-            core.Process p = (core.Process) obj;
+            SimProcess p = (SimProcess) obj;
             if (p.getInstructionsRemaining() < shortest.getInstructionsRemaining()) {
                 shortest = p;
             }
@@ -477,8 +502,8 @@ public class SimKernel {
         return shortest;
     }
     
-    private core.Process removeShortestRemaining(SinglyLinkedList<core.Process> list) {
-        core.Process shortest = findShortestRemaining(list);
+    private SimProcess removeShortestRemaining(SinglyLinkedList<SimProcess> list) {
+        SimProcess shortest = findShortestRemaining(list);
         if (shortest != null) {
             list.remove(shortest);
         }
@@ -486,13 +511,13 @@ public class SimKernel {
     }
     
     // Helpers para Prioridad
-    private core.Process findHighestPriority(SinglyLinkedList<core.Process> list) {
+    private SimProcess findHighestPriority(SinglyLinkedList<SimProcess> list) {
         Object[] array = list.toArray();
         if (array.length == 0) return null;
         
-        core.Process highest = (core.Process) array[0];
+        SimProcess highest = (SimProcess) array[0];
         for (Object obj : array) {
-            core.Process p = (core.Process) obj;
+            SimProcess p = (SimProcess) obj;
             if (p.getPriority() > highest.getPriority()) {
                 highest = p;
             }
@@ -500,8 +525,8 @@ public class SimKernel {
         return highest;
     }
     
-    private core.Process removeHighestPriority(SinglyLinkedList<core.Process> list) {
-        core.Process highest = findHighestPriority(list);
+    private SimProcess removeHighestPriority(SinglyLinkedList<SimProcess> list) {
+        SimProcess highest = findHighestPriority(list);
         if (highest != null) {
             list.remove(highest);
         }
@@ -509,15 +534,15 @@ public class SimKernel {
     }
     
     // Helpers para EDF
-    private core.Process findEarliestDeadline(SinglyLinkedList<core.Process> list) {
+    private SimProcess findEarliestDeadline(SinglyLinkedList<SimProcess> list) {
         Object[] array = list.toArray();
         if (array.length == 0) return null;
         
-        core.Process earliest = (core.Process) array[0];
+        SimProcess earliest = (SimProcess) array[0];
         int currentTick = clock.getCurrentTick();
         
         for (Object obj : array) {
-            core.Process p = (core.Process) obj;
+            SimProcess p = (SimProcess) obj;
             if (p.getDeadlineRemaining(currentTick) < earliest.getDeadlineRemaining(currentTick)) {
                 earliest = p;
             }
@@ -525,15 +550,15 @@ public class SimKernel {
         return earliest;
     }
     
-    private core.Process removeEarliestDeadline(SinglyLinkedList<core.Process> list) {
-        core.Process earliest = findEarliestDeadline(list);
+    private SimProcess removeEarliestDeadline(SinglyLinkedList<SimProcess> list) {
+        SimProcess earliest = findEarliestDeadline(list);
         if (earliest != null) {
             list.remove(earliest);
         }
         return earliest;
     }
     
-    private SystemSnapshot.ProcessInfo createProcessInfo(core.Process p) {
+    private SystemSnapshot.ProcessInfo createProcessInfo(SimProcess p) {
         return new SystemSnapshot.ProcessInfo(
             p.getPid(),
             p.getName(),
@@ -548,12 +573,12 @@ public class SimKernel {
         );
     }
     
-    private SystemSnapshot.ProcessInfo[] convertToProcessInfoArray(SinglyLinkedList<core.Process> list) {
+    private SystemSnapshot.ProcessInfo[] convertToProcessInfoArray(SinglyLinkedList<SimProcess> list) {
         Object[] array = list.toArray();
         SystemSnapshot.ProcessInfo[] result = new SystemSnapshot.ProcessInfo[array.length];
         
         for (int i = 0; i < array.length; i++) {
-            result[i] = createProcessInfo((core.Process) array[i]);
+            result[i] = createProcessInfo((SimProcess) array[i]);
         }
         
         return result;
@@ -561,7 +586,7 @@ public class SimKernel {
     
     // Métodos públicos para control
     
-    public void addProcess(core.Process p) {
+    public void addProcess(SimProcess p) {
         try {
             mutex.acquire();
             newQueue.addLast(p);

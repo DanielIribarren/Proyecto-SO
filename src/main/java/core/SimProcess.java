@@ -4,7 +4,7 @@ package core;
  * Representa un proceso en el sistema RTOS con su PCB (Process Control Block).
  * Contiene toda la información necesaria para gestionar el proceso.
  */
-public class Process {
+public class SimProcess {
     // Identificación
     private int pid;
     private String name;
@@ -39,8 +39,8 @@ public class Process {
     /**
      * Constructor para proceso normal
      */
-    public Process(int pid, String name, int totalInstructions, int priority, 
-                   int arrivalTick, int relativeDeadline) {
+    public SimProcess(int pid, String name, int totalInstructions, int priority, 
+                      int arrivalTick, int relativeDeadline) {
         this.pid = pid;
         this.name = name;
         this.totalInstructions = totalInstructions;
@@ -62,8 +62,8 @@ public class Process {
     /**
      * Constructor para ISR (Interrupt Service Routine)
      */
-    public static Process createISR(int pid, String name, int instructions, int currentTick) {
-        Process isr = new Process(pid, name, instructions, 9999, currentTick, 10);
+    public static SimProcess createISR(int pid, String name, int instructions, int currentTick) {
+        SimProcess isr = new SimProcess(pid, name, instructions, 9999, currentTick, 10);
         isr.isISR = true;
         return isr;
     }
