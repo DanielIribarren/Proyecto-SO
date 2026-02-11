@@ -31,8 +31,9 @@ public class SimKernel {
     private Queue<InterruptEvent> interruptQueue;
     
     // Configuración
-    private String currentPolicy;
+    private Policy currentPolicy;
     private int quantum;
+    private int quantumCounter; // contador para RR
     private int ramLimit;
     
     // Snapshot actual
@@ -52,8 +53,9 @@ public class SimKernel {
         this.interruptQueue = new Queue<>();
         
         this.running = null;
-        this.currentPolicy = "FCFS";
+        this.currentPolicy = Policy.FCFS;
         this.quantum = 3;
+        this.quantumCounter = 0;
         this.ramLimit = 10;
         
         this.currentSnapshot = new SystemSnapshot();
@@ -191,13 +193,64 @@ public class SimKernel {
     
     // 5. Planificación y preemption
     private void scheduleOrPreempt() {
+        // Verificar preemption según política
+        if (running != null && !readyQueue.isEmpty()) {
+            boolean shouldPreempt = false;
+            
+            // RR: verificar quantum
+            if (currentPolicy == Policy.RR) {
+                if (quantumCounter >= quantum) {
+                    shouldPreempt = true;
+                    log.log(clock.getCurrentTick(), "Quantum agotado para proceso " + running.getPid());
+                }
+            }
+            // SRT: preempta si llega proceso con menos tiempo restante
+            else if (currentPolicy == Policy.SRT) {
+                core.Process shortest = findShortestRemaining(readyQueue);
+                if (shortest != null && shortest.getInstructionsRemaining() < running.getInstructionsRemaining()) {
+                    shouldPreempt = true;
+                    log.log(clock.getCurrentTick(), "Preemption SRT: proceso más corto disponible");
+                }
+            }
+            // PRIO: preempta si llega proceso de mayor prioridad
+            else if (currentPolicy == Policy.PRIO) {
+                core.Process highest = findHighestPriority(readyQueue);
+                if (highest != null && highest.getPriority() > running.getPriority()) {
+                    shouldPreempt = true;
+                    log.log(clock.getCurrentTick(), "Preemption PRIO: proceso de mayor prioridad disponible");
+                }
+            }
+            // EDF: preempta si llega proceso con deadline más cercano
+            else if (currentPolicy == Policy.EDF) {
+                core.Process earliest = findEarliestDeadline(readyQueue);
+                if (earliest != null && earliest.getDeadlineRemaining(clock.getCurrentTick()) < running.getDeadlineRemaining(clock.getCurrentTick())) {
+                    shouldPreempt = true;
+                    log.log(clock.getCurrentTick(), "Preemption EDF: proceso con deadline más cercano disponible");
+                }
+            }
+            
+            // Aplicar preemption si es necesario
+            if (shouldPreempt) {
+                running.setState(ProcessState.READY);
+                readyQueue.addLast(running);
+                running = null;
+                quantumCounter = 0;
+            }
+        }
+        
         // Si no hay proceso corriendo, seleccionar uno
         if (running == null && !readyQueue.isEmpty()) {
             running = selectNextProcess();
             if (running != null) {
                 running.setState(ProcessState.RUNNING);
+                quantumCounter = 0;
                 log.log(clock.getCurrentTick(), "Proceso " + running.getPid() + " seleccionado para ejecución");
             }
+        }
+        
+        // Incrementar contador de quantum si hay proceso corriendo
+        if (running != null && currentPolicy == Policy.RR) {
+            quantumCounter++;
         }
     }
     
@@ -248,7 +301,7 @@ public class SimKernel {
     private SystemSnapshot buildSnapshot() {
         SystemSnapshot snapshot = new SystemSnapshot();
         snapshot.currentTick = clock.getCurrentTick();
-        snapshot.currentPolicy = currentPolicy;
+        snapshot.currentPolicy = currentPolicy.toString();
         snapshot.quantum = quantum;
         
         // Proceso corriendo
@@ -277,8 +330,34 @@ public class SimKernel {
     // Helpers
     
     private core.Process selectNextProcess() {
-        // Por ahora FCFS simple
-        return readyQueue.removeFirst();
+        if (readyQueue.isEmpty()) {
+            return null;
+        }
+        
+        switch (currentPolicy) {
+            case FCFS:
+                // First-Come-First-Served: el primero en llegar
+                return readyQueue.removeFirst();
+                
+            case RR:
+                // Round Robin: igual que FCFS pero con quantum
+                return readyQueue.removeFirst();
+                
+            case SRT:
+                // Shortest Remaining Time: el de menor tiempo restante
+                return removeShortestRemaining(readyQueue);
+                
+            case PRIO:
+                // Prioridad Estática: el de mayor prioridad
+                return removeHighestPriority(readyQueue);
+                
+            case EDF:
+                // Earliest Deadline First: el de deadline más cercano
+                return removeEarliestDeadline(readyQueue);
+                
+            default:
+                return readyQueue.removeFirst();
+        }
     }
     
     private core.Process findLowestPriority(SinglyLinkedList<core.Process> list) {
@@ -293,6 +372,77 @@ public class SimKernel {
             }
         }
         return lowest;
+    }
+    
+    // Helpers para SRT
+    private core.Process findShortestRemaining(SinglyLinkedList<core.Process> list) {
+        Object[] array = list.toArray();
+        if (array.length == 0) return null;
+        
+        core.Process shortest = (core.Process) array[0];
+        for (Object obj : array) {
+            core.Process p = (core.Process) obj;
+            if (p.getInstructionsRemaining() < shortest.getInstructionsRemaining()) {
+                shortest = p;
+            }
+        }
+        return shortest;
+    }
+    
+    private core.Process removeShortestRemaining(SinglyLinkedList<core.Process> list) {
+        core.Process shortest = findShortestRemaining(list);
+        if (shortest != null) {
+            list.remove(shortest);
+        }
+        return shortest;
+    }
+    
+    // Helpers para Prioridad
+    private core.Process findHighestPriority(SinglyLinkedList<core.Process> list) {
+        Object[] array = list.toArray();
+        if (array.length == 0) return null;
+        
+        core.Process highest = (core.Process) array[0];
+        for (Object obj : array) {
+            core.Process p = (core.Process) obj;
+            if (p.getPriority() > highest.getPriority()) {
+                highest = p;
+            }
+        }
+        return highest;
+    }
+    
+    private core.Process removeHighestPriority(SinglyLinkedList<core.Process> list) {
+        core.Process highest = findHighestPriority(list);
+        if (highest != null) {
+            list.remove(highest);
+        }
+        return highest;
+    }
+    
+    // Helpers para EDF
+    private core.Process findEarliestDeadline(SinglyLinkedList<core.Process> list) {
+        Object[] array = list.toArray();
+        if (array.length == 0) return null;
+        
+        core.Process earliest = (core.Process) array[0];
+        int currentTick = clock.getCurrentTick();
+        
+        for (Object obj : array) {
+            core.Process p = (core.Process) obj;
+            if (p.getDeadlineRemaining(currentTick) < earliest.getDeadlineRemaining(currentTick)) {
+                earliest = p;
+            }
+        }
+        return earliest;
+    }
+    
+    private core.Process removeEarliestDeadline(SinglyLinkedList<core.Process> list) {
+        core.Process earliest = findEarliestDeadline(list);
+        if (earliest != null) {
+            list.remove(earliest);
+        }
+        return earliest;
     }
     
     private SystemSnapshot.ProcessInfo createProcessInfo(core.Process p) {
@@ -350,8 +500,10 @@ public class SimKernel {
         return currentSnapshot;
     }
     
-    public void setPolicy(String policy) {
+    public void setPolicy(Policy policy) {
         this.currentPolicy = policy;
+        this.quantumCounter = 0; // reiniciar contador al cambiar política
+        log.log(clock.getCurrentTick(), "Política cambiada a: " + policy);
     }
     
     public void setQuantum(int quantum) {
