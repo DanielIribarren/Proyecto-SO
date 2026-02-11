@@ -1,11 +1,16 @@
-SystemSnapshot.java
-TestSimulator.java
-SystemSnapshot.class
-TestSimulator.class
+# ===== Java =====
+*.class
 
-Simkernel.java
-Simkernel.class
+# ===== Maven =====
+target/
 
+# ===== NetBeans =====
+.nbattrs
+nbproject/private/
 
-TestDataStructures.java
-TestDataStructures.class
+# ===== VS Code / Windsurf =====
+.vscode/
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
