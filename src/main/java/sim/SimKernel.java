@@ -29,6 +29,7 @@ public class SimKernel {
     
     // Cola de interrupciones
     private Queue<InterruptEvent> interruptQueue;
+    private InterruptGenerator interruptGenerator;
     
     // Configuración
     private Policy currentPolicy;
@@ -599,5 +600,25 @@ public class SimKernel {
     
     public Clock getClock() {
         return clock;
+    }
+    
+    // Control del generador de interrupciones
+    public void startInterruptGenerator(int minInterval, int maxInterval) {
+        if (interruptGenerator == null || !interruptGenerator.isRunning()) {
+            interruptGenerator = new InterruptGenerator(this, minInterval, maxInterval);
+            interruptGenerator.start();
+            log.log(clock.getCurrentTick(), "Generador de interrupciones iniciado");
+        }
+    }
+    
+    public void stopInterruptGenerator() {
+        if (interruptGenerator != null && interruptGenerator.isRunning()) {
+            interruptGenerator.stopGenerator();
+            log.log(clock.getCurrentTick(), "Generador de interrupciones detenido");
+        }
+    }
+    
+    public boolean isInterruptGeneratorRunning() {
+        return interruptGenerator != null && interruptGenerator.isRunning();
     }
 }
