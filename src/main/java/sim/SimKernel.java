@@ -32,6 +32,7 @@ public class SimKernel {
     // Cola de interrupciones
     private Queue<InterruptEvent> interruptQueue;
     private InterruptGenerator interruptGenerator;
+    private int nextIsrPid = 9000;
     
     // Métricas
     private MetricsCollector metrics;
@@ -121,8 +122,8 @@ public class SimKernel {
             log.log(clock.getCurrentTick(), "Proceso " + running.getPid() + " preemptado por interrupción");
         }
         
-        // Crear ISR y ponerlo a correr
-        SimProcess isr = SimProcess.createISR(9999, "ISR_" + event.getType(), 5, clock.getCurrentTick());
+        // Crear ISR y ponerlo a correr (PID único por ISR)
+        SimProcess isr = SimProcess.createISR(nextIsrPid++, "ISR_" + event.getType(), 5, clock.getCurrentTick());
         isr.setState(ProcessState.RUNNING);
         running = isr;
         log.log(clock.getCurrentTick(), "ISR iniciada: " + isr.getName());
@@ -208,9 +209,10 @@ public class SimKernel {
         int processesInRam = readyQueue.size() + blockedQueue.size() + (running != null ? 1 : 0);
         
         // SWAP OUT: Si excedemos RAM, suspender procesos de menor prioridad
-        // Primero intentar suspender procesos READY
+        // Nunca suspender ISRs (son del sistema operativo)
+        // Primero intentar suspender procesos READY (no ISR)
         while (processesInRam > ramLimit && !readyQueue.isEmpty()) {
-            SimProcess toSwap = findLowestPriority(readyQueue);
+            SimProcess toSwap = findLowestPriorityNonISR(readyQueue);
             if (toSwap != null) {
                 readyQueue.remove(toSwap);
                 toSwap.setState(ProcessState.SUSPENDED_READY);
@@ -222,9 +224,9 @@ public class SimKernel {
             }
         }
         
-        // Si aún excedemos RAM y no hay más READY, suspender BLOCKED
+        // Si aún excedemos RAM y no hay más READY, suspender BLOCKED (no ISR)
         while (processesInRam > ramLimit && !blockedQueue.isEmpty()) {
-            SimProcess toSwap = findLowestPriority(blockedQueue);
+            SimProcess toSwap = findLowestPriorityNonISR(blockedQueue);
             if (toSwap != null) {
                 blockedQueue.remove(toSwap);
                 toSwap.setState(ProcessState.SUSPENDED_BLOCKED);
@@ -368,9 +370,10 @@ public class SimKernel {
             return;
         }
         
-        // Verificar deadline miss
-        if (running.hasMissedDeadline(clock.getCurrentTick())) {
+        // Verificar deadline miss (loguear solo 1 vez)
+        if (running.hasMissedDeadline(clock.getCurrentTick()) && !running.isDeadlineMissLogged()) {
             running.setMissedDeadline(true);
+            running.setDeadlineMissLogged(true);
             log.log(clock.getCurrentTick(), "DEADLINE MISS: Proceso " + running.getPid());
         }
     }
@@ -466,6 +469,21 @@ public class SimKernel {
         for (Object obj : array) {
             SimProcess p = (SimProcess) obj;
             if (p.getPriority() < lowest.getPriority()) {
+                lowest = p;
+            }
+        }
+        return lowest;
+    }
+    
+    private SimProcess findLowestPriorityNonISR(SinglyLinkedList<SimProcess> list) {
+        Object[] array = list.toArray();
+        if (array.length == 0) return null;
+        
+        SimProcess lowest = null;
+        for (Object obj : array) {
+            SimProcess p = (SimProcess) obj;
+            if (p.isISR()) continue;
+            if (lowest == null || p.getPriority() < lowest.getPriority()) {
                 lowest = p;
             }
         }
@@ -625,6 +643,22 @@ public class SimKernel {
     
     public Clock getClock() {
         return clock;
+    }
+    
+    public void setRamLimit(int ramLimit) {
+        this.ramLimit = ramLimit;
+    }
+    
+    public Policy getPolicy() {
+        return currentPolicy;
+    }
+    
+    public int getQuantum() {
+        return quantum;
+    }
+    
+    public MetricsCollector getMetrics() {
+        return metrics;
     }
     
     // Control del generador de interrupciones

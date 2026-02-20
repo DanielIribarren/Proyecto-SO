@@ -35,6 +35,7 @@ public class SimProcess {
     
     // Flags
     private boolean isISR; // Es una rutina de servicio de interrupción
+    private boolean deadlineMissLogged; // Para loguear DEADLINE MISS solo 1 vez
     
     /**
      * Constructor para proceso normal
@@ -55,6 +56,7 @@ public class SimProcess {
         this.mar = 0;
         this.missedDeadline = false;
         this.isISR = false;
+        this.deadlineMissLogged = false;
         this.waitTime = 0;
         this.completionTick = -1;
     }
@@ -215,6 +217,14 @@ public class SimProcess {
     
     public boolean isISR() {
         return isISR;
+    }
+    
+    public boolean isDeadlineMissLogged() {
+        return deadlineMissLogged;
+    }
+    
+    public void setDeadlineMissLogged(boolean logged) {
+        this.deadlineMissLogged = logged;
     }
     
     @Override
