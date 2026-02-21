@@ -40,19 +40,32 @@ Proyecto-SO/
 
 ### Sprint 1 - COMPLETADO ✓
 - ✅ Estructuras de datos propias (sin Collections de Java)
-- ✅ Node, SinglyLinkedList, Queue con toArray()
-- ✅ insertOrdered() para políticas ordenadas
 
 ### Sprint 2 - COMPLETADO ✓
 - ✅ ProcessState enum (7 estados)
-- ✅ Process con PCB completo
-- ✅ IOSpec para E/S
 - ✅ InterruptEvent para interrupciones
 - ✅ Deadline absoluto implementado
 
-### Sprint 3 - PENDIENTE
-- ⏳ Clock, EventLog, SystemSnapshot
-- ⏳ SimKernel con tick contract
+### Sprint 3 - COMPLETADO ✓
+- ✅ Motor básico (SimKernel, Clock, EventLog, SystemSnapshot)
+
+### Sprint 4 - COMPLETADO ✓
+- ✅ Scheduling con enum Policy (FCFS, RR, SRT, PRIO, EDF)
+
+### Sprint 5 - COMPLETADO ✓
+- ✅ E/S y estados avanzados
+
+### Sprint 6 - COMPLETADO ✓
+- ✅ Interrupciones con threads
+  
+### Sprint 7 - COMPLETADO ✓
+- ✅ Métricas (tasa de éxito, throughput, CPU utilization)
+
+### Sprint 8 - COMPLETADO ✓
+- ✅ GUI Swing
+
+### Sprint 9 - COMPLETADO ✓
+- ✅ Testing y documentación para defensa
 
 ## 🧪 Cómo ejecutar los tests
 
@@ -99,15 +112,6 @@ mvn exec:java -Dexec.mainClass="core.TestCoreModels"
 - **Librerías permitidas:** JFreeChart (gráficas), Hilos/Semáforos estándar
 - **Prohibido:** Collections Framework de Java
 
-## 🎯 Próximos Pasos
-
-1. Sprint 3: Motor básico (SimKernel, Clock, EventLog, SystemSnapshot)
-2. Sprint 4: Scheduling con enum Policy (FCFS, RR, SRT, PRIO, EDF)
-3. Sprint 5: E/S y estados avanzados
-4. Sprint 6: Interrupciones con threads
-5. Sprint 7: Métricas (tasa de éxito, throughput, CPU utilization)
-6. Sprint 8: GUI Swing
-7. Sprint 9: Testing y documentación para defensa
-
 ## 👥 Equipo
-Proyecto Sistemas Operativos - Unimet 2526-2
+Enrique León y Daniel Iribarren 
+Proyecto 1 de Sistemas Operativos - Unimet 2526-2
